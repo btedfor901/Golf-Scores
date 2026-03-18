@@ -21,19 +21,30 @@ export default function Login() {
     e.preventDefault()
     if (!name.trim()) return toast.error('Name required')
     setLoading(true)
+
+    // Sign up
     const { data, error } = await supabase.auth.signUp({ email, password })
     if (error) { toast.error(error.message); setLoading(false); return }
-    // Insert player record
-    if (data.user) {
-      const isCommissioner = name.trim().toLowerCase() === 'trey tedford'
-      await supabase.from('players').insert({
-        id: data.user.id,
-        name: name.trim(),
-        email,
-        is_commissioner: isCommissioner,
-      })
+
+    // Sign in immediately to get an active session so RLS insert works
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+    if (signInError) {
+      toast.success('Account created! Please sign in.')
+      setLoading(false)
+      return
     }
-    toast.success('Account created! Check your email to confirm.')
+
+    // Insert player record now that we have an active session
+    const userId = signInData.user.id
+    const isCommissioner = name.trim().toLowerCase() === 'trey tedford'
+    const { error: insertError } = await supabase.from('players').insert({
+      id: userId,
+      name: name.trim(),
+      email,
+      is_commissioner: isCommissioner,
+    })
+
+    if (insertError) toast.error('Profile save failed: ' + insertError.message)
     setLoading(false)
   }
 

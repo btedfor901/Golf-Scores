@@ -14,7 +14,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!player) return
+    if (!player) { setLoading(false); return }
     loadData()
 
     // Real-time subscription for active rounds
