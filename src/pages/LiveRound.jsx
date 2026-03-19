@@ -75,9 +75,16 @@ export default function LiveRound() {
       .eq('id', existing.id)
     if (error) {
       toast.error('Could not save score: ' + error.message)
-      // Revert on error
       setHoleScores(prev => prev.map(hs => hs.id === existing.id ? { ...hs, score: existing.score } : hs))
     }
+  }
+
+  async function clearScore(holeNumber) {
+    const targetPlayer = viewingPlayer ?? player.id
+    const existing = holeScores.find(hs => hs.player_id === targetPlayer && hs.hole_number === holeNumber)
+    if (!existing) return
+    setHoleScores(prev => prev.map(hs => hs.id === existing.id ? { ...hs, score: null } : hs))
+    await supabase.from('hole_scores').update({ score: null, updated_at: new Date().toISOString() }).eq('id', existing.id)
   }
 
   async function cancelRound() {
@@ -225,6 +232,9 @@ export default function LiveRound() {
                           {score ?? '·'}
                         </div>
                         <button onClick={() => updateScore(holeNum, 1)} className="w-7 h-7 rounded-full bg-slate-700 text-white flex items-center justify-center text-lg font-bold hover:bg-slate-600">+</button>
+                        {score && (
+                          <button onClick={() => clearScore(holeNum)} className="w-5 h-5 rounded-full bg-red-900/50 text-red-400 flex items-center justify-center text-xs hover:bg-red-900/80">✕</button>
+                        )}
                       </>
                     ) : (
                       <div className={`w-8 h-8 flex items-center justify-center font-bold text-sm ${score ? scoreClass(score, par) : 'text-slate-600'}`}>
