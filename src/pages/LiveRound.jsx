@@ -60,13 +60,27 @@ export default function LiveRound() {
 
   async function updateScore(holeNumber, delta) {
     if (!player) return
-    const existing = holeScores.find(hs => hs.player_id === player.id && hs.hole_number === holeNumber)
-    if (!existing) return
-    const par = existing.par
-    const currentScore = existing.score ?? par
+    const targetPlayer = viewingPlayer ?? player.id
+    const existing = holeScores.find(hs => hs.player_id === targetPlayer && hs.hole_number === holeNumber)
+    if (!existing) {
+      toast.error('Hole record not found — delete and restart this round')
+      return
+    }
+    const currentScore = existing.score ?? existing.par
     const newScore = Math.max(1, currentScore + delta)
-    await supabase.from('hole_scores')
-      .upsert({ ...existing, score: newScore, updated_at: new Date().toISOString() })
+    const { error } = await supabase.from('hole_scores')
+      .update({ score: newScore, updated_at: new Date().toISOString() })
+      .eq('id', existing.id)
+    if (error) toast.error('Could not save score: ' + error.message)
+  }
+
+  async function cancelRound() {
+    if (!confirm('Delete this round permanently? This cannot be undone.')) return
+    await supabase.from('hole_scores').delete().eq('round_id', id)
+    await supabase.from('round_players').delete().eq('round_id', id)
+    await supabase.from('rounds').delete().eq('id', id)
+    toast.success('Round deleted')
+    navigate('/')
   }
 
   async function completeRound() {
@@ -129,7 +143,10 @@ export default function LiveRound() {
             <span className="text-xs bg-red-500/20 text-red-400 border border-red-700 px-2 py-0.5 rounded-full animate-pulse">LIVE</span>
           )}
           {canAdmin && round.status === 'in_progress' && (
-            <button onClick={completeRound} className="btn-secondary text-xs py-1 px-2">Finish</button>
+            <div className="flex gap-2">
+              <button onClick={completeRound} className="btn-secondary text-xs py-1 px-2">Finish</button>
+              <button onClick={cancelRound} className="text-xs py-1 px-2 rounded bg-red-900/40 text-red-400 border border-red-800 hover:bg-red-900/60">Delete</button>
+            </div>
           )}
         </div>
       </div>
@@ -188,7 +205,7 @@ export default function LiveRound() {
               const hsForViewed = holeScores.find(hs => hs.player_id === viewingPlayer && hs.hole_number === holeNum)
               const par = hsForViewed?.par ?? 4
               const score = hsForViewed?.score
-              const isMyHole = viewingPlayer === player?.id && round.status === 'in_progress'
+              const isMyHole = (isParticipant || canAdmin) && round.status === 'in_progress'
 
               return (
                 <div key={holeNum} className={`grid grid-cols-[auto_1fr_auto] items-center px-4 py-3 border-b border-slate-700/50 ${i === 8 ? 'border-b-2 border-slate-500' : ''}`}>
