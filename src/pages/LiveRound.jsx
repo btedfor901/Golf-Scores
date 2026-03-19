@@ -59,8 +59,7 @@ export default function LiveRound() {
   }, [id, loadAll])
 
   async function updateScore(holeNumber, delta) {
-    toast('Updating hole ' + holeNumber + '...')
-    if (!player) { toast.error('No player loaded'); return }
+    if (!player) return
     const targetPlayer = viewingPlayer ?? player.id
     const existing = holeScores.find(hs => hs.player_id === targetPlayer && hs.hole_number === holeNumber)
     if (!existing) {
@@ -69,11 +68,16 @@ export default function LiveRound() {
     }
     const currentScore = existing.score ?? existing.par
     const newScore = Math.max(1, currentScore + delta)
+    // Update local state immediately so UI reflects change right away
+    setHoleScores(prev => prev.map(hs => hs.id === existing.id ? { ...hs, score: newScore } : hs))
     const { error } = await supabase.from('hole_scores')
       .update({ score: newScore, updated_at: new Date().toISOString() })
       .eq('id', existing.id)
-    if (error) toast.error('Could not save score: ' + error.message)
-    else toast.success('Saved hole ' + holeNumber + ': ' + newScore)
+    if (error) {
+      toast.error('Could not save score: ' + error.message)
+      // Revert on error
+      setHoleScores(prev => prev.map(hs => hs.id === existing.id ? { ...hs, score: existing.score } : hs))
+    }
   }
 
   async function cancelRound() {
