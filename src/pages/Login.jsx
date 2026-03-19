@@ -23,7 +23,7 @@ export default function Login() {
     setLoading(true)
 
     // Sign up
-    const { data, error } = await supabase.auth.signUp({ email, password })
+    const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { name: name.trim() } } })
     if (error) { toast.error(error.message); setLoading(false); return }
 
     // Sign in immediately to get an active session so RLS insert works
