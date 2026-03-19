@@ -59,7 +59,8 @@ export default function LiveRound() {
   }, [id, loadAll])
 
   async function updateScore(holeNumber, delta) {
-    if (!player) return
+    toast('Updating hole ' + holeNumber + '...')
+    if (!player) { toast.error('No player loaded'); return }
     const targetPlayer = viewingPlayer ?? player.id
     const existing = holeScores.find(hs => hs.player_id === targetPlayer && hs.hole_number === holeNumber)
     if (!existing) {
@@ -72,6 +73,7 @@ export default function LiveRound() {
       .update({ score: newScore, updated_at: new Date().toISOString() })
       .eq('id', existing.id)
     if (error) toast.error('Could not save score: ' + error.message)
+    else toast.success('Saved hole ' + holeNumber + ': ' + newScore)
   }
 
   async function cancelRound() {
