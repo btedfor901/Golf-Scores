@@ -1,20 +1,26 @@
 import { useState } from 'react'
+import { useNavigate, Navigate } from 'react-router-dom'
 import { supabase } from '../supabase'
+import { useAuth } from '../context/AuthContext'
 import toast from 'react-hot-toast'
 
 export default function Login() {
+  const { user } = useAuth()
+  const navigate = useNavigate()
   const [tab, setTab] = useState('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(false)
 
+  if (user) return <Navigate to="/" replace />
+
   async function handleSignIn(e) {
     e.preventDefault()
     setLoading(true)
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) toast.error(error.message)
-    setLoading(false)
+    if (error) { toast.error(error.message); setLoading(false); return }
+    navigate('/')
   }
 
   async function handleSignUp(e) {
