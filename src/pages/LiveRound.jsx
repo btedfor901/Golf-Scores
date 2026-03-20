@@ -289,13 +289,45 @@ export default function LiveRound() {
       return { label: status, sub: `Thru ${holesPlayed}`, color: 'text-green-400' }
     }
 
+    if (bet.type === 'scramble') {
+      // Scramble: hole-by-hole, team with lower score wins the hole
+      const teams = {}
+      bp.forEach(b => { const t = b.team ?? 1; if (!teams[t]) teams[t] = []; teams[t].push(b.player_id) })
+      const teamKeys = Object.keys(teams)
+      if (teamKeys.length !== 2) return null
+      const [tk1, tk2] = teamKeys
+      const fromHole = bet.press_from_hole ?? 1
+      let t1Up = 0
+      let holesPlayed = 0
+      for (let h = fromHole; h <= 18; h++) {
+        const t1Scores = teams[tk1].map(pid => holeScores.find(hs => hs.player_id === pid && hs.hole_number === h)?.score).filter(s => s != null)
+        const t2Scores = teams[tk2].map(pid => holeScores.find(hs => hs.player_id === pid && hs.hole_number === h)?.score).filter(s => s != null)
+        if (t1Scores.length && t2Scores.length) {
+          const t1Best = Math.min(...t1Scores), t2Best = Math.min(...t2Scores)
+          holesPlayed++
+          if (t1Best < t2Best) t1Up++
+          else if (t2Best < t1Best) t1Up--
+        }
+      }
+      const remaining = 18 - (fromHole - 1) - holesPlayed
+      if (t1Up === 0) return { label: 'All Square', sub: `Thru ${holesPlayed}`, color: 'text-slate-300' }
+      const leader = t1Up > 0 ? 'Team 1' : 'Team 2'
+      const diff = Math.abs(t1Up)
+      const status = diff > remaining ? `${leader} wins ${diff}&${remaining}` : `${leader} ${diff} UP`
+      return { label: status, sub: `Thru ${holesPlayed}`, color: t1Up > 0 ? 'text-blue-400' : 'text-orange-400' }
+    }
+
     if (isTeamBet) {
+      // Team stroke play: total strokes with handicap strokes applied
       const teams = {}
       bp.forEach(b => { const t = b.team ?? 1; if (!teams[t]) teams[t] = []; teams[t].push(b.player_id) })
       const teamKeys = Object.keys(teams)
       if (teamKeys.length !== 2) return null
 
-      const teamScore = (ids) => ids.reduce((sum, pid) => sum + getTotal(pid), 0)
+      const fromHole = bet.press_from_hole ?? 1
+      const teamScore = (ids) => ids.reduce((sum, pid) => {
+        return sum + holeScores.filter(hs => hs.player_id === pid && hs.hole_number >= fromHole && hs.score).reduce((s, hs) => s + hs.score, 0)
+      }, 0)
       const details = bet.details ?? {}
       const givingTeam = String(details.givingTeam ?? teamKeys[0])
       const strokes = parseInt(details.strokes ?? 0)
