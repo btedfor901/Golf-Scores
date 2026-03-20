@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { useAuth } from '../context/AuthContext'
 import { scoreClass } from '../utils/handicap'
+import { settleBet } from '../utils/betting'
 import toast from 'react-hot-toast'
 
 function haversineYards(lat1, lng1, lat2, lng2) {
@@ -135,16 +136,67 @@ export default function LiveRound() {
 
   async function completeRound() {
     if (!confirm('Mark this round as complete?')) return
-    // Update total scores in round_players
-    const updates = roundPlayers.map(rp => {
+
+    // Update total scores
+    const scoreUpdates = roundPlayers.map(rp => {
       const scores = holeScores.filter(hs => hs.player_id === rp.player_id && hs.score)
       const total = scores.reduce((sum, hs) => sum + hs.score, 0)
       return supabase.from('round_players').update({ total_score: total }).eq('id', rp.id)
     })
-    await Promise.all(updates)
+    await Promise.all(scoreUpdates)
+
+    // Settle all unsettled bets
+    const { data: freshRP } = await supabase.from('round_players').select('*').eq('round_id', id)
+    const unsettledBets = bets.filter(b => !b.is_settled)
+    for (const bet of unsettledBets) {
+      const bp = betPlayers.filter(b => b.bet_id === bet.id)
+      const results = settleBet(bet, bp, holeScores, freshRP ?? roundPlayers)
+      if (results.length > 0) {
+        await Promise.all(results.map(r =>
+          supabase.from('bet_players')
+            .update({ result: r.result, amount_won_lost: r.amount_won_lost })
+            .eq('bet_id', bet.id).eq('player_id', r.player_id)
+        ))
+        await supabase.from('bets').update({ is_settled: true }).eq('id', bet.id)
+      }
+    }
+
     await supabase.from('rounds').update({ status: 'complete' }).eq('id', id)
-    toast.success('Round completed!')
+    toast.success(`Round complete!${unsettledBets.length > 0 ? ' Bets settled.' : ''}`)
     navigate('/')
+  }
+
+  async function pressBet(bet) {
+    const bp = betPlayers.filter(b => b.bet_id === bet.id)
+    const { data: newBet, error } = await supabase.from('bets').insert({
+      round_id: id,
+      type: bet.type,
+      amount: bet.amount,
+      description: `Press${bet.description ? ` (${bet.description})` : ''}`,
+      details: bet.details,
+      created_by: player.id,
+    }).select().single()
+    if (error) return toast.error('Could not create press')
+    await supabase.from('bet_players').insert(
+      bp.map(b => ({ bet_id: newBet.id, player_id: b.player_id, team: b.team, result: 'pending', amount_won_lost: 0 }))
+    )
+    toast.success('Press is on! 🎯')
+    loadAll()
+  }
+
+  async function concedeBet(bet, loser) {
+    // loser = team number (1/2) for team bets, player_id for individual bets
+    const bp = betPlayers.filter(b => b.bet_id === bet.id)
+    const isTeamBet = bet.type === 'team_stroke_play' || bet.type === 'scramble'
+    await Promise.all(bp.map(b => {
+      const isLoser = isTeamBet ? String(b.team) === String(loser) : b.player_id === loser
+      return supabase.from('bet_players')
+        .update({ result: isLoser ? 'lose' : 'win', amount_won_lost: isLoser ? -bet.amount : bet.amount })
+        .eq('id', b.id)
+    }))
+    await supabase.from('bets').update({ is_settled: true }).eq('id', bet.id)
+    toast.success('Bet settled!')
+    loadAll()
   }
 
   async function setPin(holeNumber) {
@@ -402,6 +454,7 @@ export default function LiveRound() {
                       </span>
                     ))}
                   </div>
+                  {/* Settled results */}
                   {bet.is_settled && (
                     <div className="mt-2 pt-2 border-t border-slate-700 space-y-1">
                       {bp.map(b => (
@@ -412,6 +465,31 @@ export default function LiveRound() {
                           </span>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Press & Concede buttons for active bets */}
+                  {!bet.is_settled && round.status === 'in_progress' && (
+                    <div className="mt-3 pt-2 border-t border-slate-700 flex flex-wrap gap-2">
+                      <button onClick={() => pressBet(bet)} className="text-xs bg-yellow-700/40 text-yellow-300 border border-yellow-700/50 px-3 py-1.5 rounded-lg font-medium">
+                        🎯 Press
+                      </button>
+                      {(bet.type === 'team_stroke_play' || bet.type === 'scramble') ? (
+                        <>
+                          <button onClick={() => concedeBet(bet, 1)} className="text-xs bg-red-900/40 text-red-300 border border-red-800/50 px-3 py-1.5 rounded-lg">
+                            Team 1 Concede
+                          </button>
+                          <button onClick={() => concedeBet(bet, 2)} className="text-xs bg-red-900/40 text-red-300 border border-red-800/50 px-3 py-1.5 rounded-lg">
+                            Team 2 Concede
+                          </button>
+                        </>
+                      ) : (
+                        bp.map(b => (
+                          <button key={b.player_id} onClick={() => concedeBet(bet, b.player_id)} className="text-xs bg-red-900/40 text-red-300 border border-red-800/50 px-3 py-1.5 rounded-lg">
+                            {getPlayerName(b.player_id).split(' ')[0]} Concede
+                          </button>
+                        ))
+                      )}
                     </div>
                   )}
                 </div>
