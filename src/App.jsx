@@ -11,6 +11,7 @@ import History from './pages/History'
 import Leaderboard from './pages/Leaderboard'
 import Betting from './pages/Betting'
 import Commissioner from './pages/Commissioner'
+import GreensBook from './pages/GreensBook'
 
 function App() {
   return (
@@ -25,6 +26,7 @@ function App() {
           <Route path="/history" element={<ProtectedRoute><Layout><History /></Layout></ProtectedRoute>} />
           <Route path="/leaderboard" element={<ProtectedRoute><Layout><Leaderboard /></Layout></ProtectedRoute>} />
           <Route path="/betting/:roundId" element={<ProtectedRoute><Layout><Betting /></Layout></ProtectedRoute>} />
+          <Route path="/greens-book" element={<ProtectedRoute><Layout><GreensBook /></Layout></ProtectedRoute>} />
           <Route path="/commissioner" element={<ProtectedRoute commissionerOnly><Layout><Commissioner /></Layout></ProtectedRoute>} />
         </Routes>
       </BrowserRouter>
