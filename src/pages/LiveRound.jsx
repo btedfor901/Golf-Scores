@@ -215,6 +215,76 @@ export default function LiveRound() {
     return haversineYards(gpsPos.lat, gpsPos.lng, pin.lat, pin.lng)
   }
 
+  function getLiveBetStatus(bet, bp) {
+    const isTeamBet = bet.type === 'team_stroke_play' || bet.type === 'scramble'
+    const holesPlayed = Math.max(...roundPlayerIds.map(pid => getHolesPlayed(pid)), 0)
+
+    if (bet.type === 'match_play' && bp.length === 2) {
+      const [p1, p2] = bp.map(b => b.player_id)
+      let p1Up = 0
+      for (let h = 1; h <= 18; h++) {
+        const s1 = holeScores.find(hs => hs.player_id === p1 && hs.hole_number === h)?.score
+        const s2 = holeScores.find(hs => hs.player_id === p2 && hs.hole_number === h)?.score
+        if (s1 != null && s2 != null) {
+          if (s1 < s2) p1Up++
+          else if (s2 < s1) p1Up--
+        }
+      }
+      const n1 = getPlayerName(p1).split(' ')[0]
+      const n2 = getPlayerName(p2).split(' ')[0]
+      if (p1Up === 0) return { label: 'All Square', sub: `Thru ${holesPlayed}`, color: 'text-slate-300' }
+      const leader = p1Up > 0 ? n1 : n2
+      const diff = Math.abs(p1Up)
+      const remaining = 18 - holesPlayed
+      const status = diff > remaining ? `${leader} wins ${diff}&${remaining}` : `${leader} ${diff} UP`
+      return { label: status, sub: `Thru ${holesPlayed}`, color: 'text-green-400' }
+    }
+
+    if (isTeamBet) {
+      const teams = {}
+      bp.forEach(b => { const t = b.team ?? 1; if (!teams[t]) teams[t] = []; teams[t].push(b.player_id) })
+      const teamKeys = Object.keys(teams)
+      if (teamKeys.length !== 2) return null
+
+      const teamScore = (ids) => ids.reduce((sum, pid) => sum + getTotal(pid), 0)
+      const details = bet.details ?? {}
+      const givingTeam = String(details.givingTeam ?? teamKeys[0])
+      const strokes = parseInt(details.strokes ?? 0)
+      const receivingTeam = teamKeys.find(t => t !== givingTeam) ?? teamKeys[1]
+
+      const scores = {}
+      teamKeys.forEach(t => { scores[t] = teamScore(teams[t]) })
+      const t1Raw = scores[teamKeys[0]], t2Raw = scores[teamKeys[1]]
+      scores[receivingTeam] -= strokes
+
+      const t1Net = scores[teamKeys[0]], t2Net = scores[teamKeys[1]]
+      const t1Names = teams[teamKeys[0]].map(pid => getPlayerName(pid).split(' ')[0]).join(' & ')
+      const t2Names = teams[teamKeys[1]].map(pid => getPlayerName(pid).split(' ')[0]).join(' & ')
+
+      const diff = t1Net - t2Net
+      const leader = diff < 0 ? `T1 (${t1Names})` : diff > 0 ? `T2 (${t2Names})` : null
+      const statusLabel = diff === 0 ? 'All Square' : `${leader} leads by ${Math.abs(diff)}`
+      const scoreStr = strokes > 0
+        ? `T1: ${t1Raw || '--'}  T2: ${t2Raw || '--'}  (${strokes} stroke give)`
+        : `T1: ${t1Raw || '--'}  T2: ${t2Raw || '--'}`
+
+      return { label: statusLabel, sub: scoreStr, color: diff === 0 ? 'text-slate-300' : 'text-green-400' }
+    }
+
+    if (bet.type === 'stroke_play') {
+      const ranked = bp.map(b => {
+        const rp = roundPlayers.find(r => r.player_id === b.player_id)
+        const gross = getTotal(b.player_id)
+        const net = gross - (rp?.handicap_at_round ?? 0)
+        return { name: getPlayerName(b.player_id).split(' ')[0], gross, net }
+      }).filter(r => r.gross > 0).sort((a, b) => a.net - b.net)
+      if (ranked.length === 0) return { label: 'No scores yet', sub: '', color: 'text-slate-500' }
+      return { label: `${ranked[0].name} leads`, sub: ranked.map(r => `${r.name}: ${r.net}`).join('  '), color: 'text-green-400' }
+    }
+
+    return null
+  }
+
   const getPlayerScores = (playerId) => holeScores.filter(hs => hs.player_id === playerId).sort((a, b) => a.hole_number - b.hole_number)
   const getTotal = (playerId) => {
     const scores = getPlayerScores(playerId).filter(hs => hs.score)
@@ -447,13 +517,25 @@ export default function LiveRound() {
                     </div>
                     <div className="text-green-400 font-bold">${bet.amount}</div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 mb-2">
                     {bp.map(b => (
                       <span key={b.id} className={`text-xs px-2 py-0.5 rounded-full ${b.result === 'win' ? 'bg-green-700/40 text-green-300' : b.result === 'lose' ? 'bg-red-700/40 text-red-300' : 'bg-slate-700 text-slate-400'}`}>
                         {getPlayerName(b.player_id).split(' ')[0]} {b.team ? `(T${b.team})` : ''}
                       </span>
                     ))}
                   </div>
+
+                  {/* Live bet status */}
+                  {!bet.is_settled && (() => {
+                    const status = getLiveBetStatus(bet, bp)
+                    if (!status) return null
+                    return (
+                      <div className="bg-slate-700/50 rounded-lg px-3 py-2 mt-1">
+                        <div className={`font-bold text-sm ${status.color}`}>{status.label}</div>
+                        {status.sub && <div className="text-xs text-slate-400 mt-0.5">{status.sub}</div>}
+                      </div>
+                    )
+                  })()}
                   {/* Settled results */}
                   {bet.is_settled && (
                     <div className="mt-2 pt-2 border-t border-slate-700 space-y-1">
