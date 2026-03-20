@@ -39,15 +39,17 @@ export default function LiveRound() {
       { data: hsData },
       { data: playersData },
       { data: betsData },
-      { data: bpData },
     ] = await Promise.all([
       supabase.from('rounds').select('*').eq('id', id).single(),
       supabase.from('round_players').select('*').eq('round_id', id),
       supabase.from('hole_scores').select('*').eq('round_id', id),
       supabase.from('players').select('*'),
       supabase.from('bets').select('*').eq('round_id', id),
-      supabase.from('bet_players').select('*, bets!inner(round_id)').eq('bets.round_id', id),
     ])
+    const betIds = (betsData ?? []).map(b => b.id)
+    const { data: bpData } = betIds.length > 0
+      ? await supabase.from('bet_players').select('*').in('bet_id', betIds)
+      : { data: [] }
     setRound(roundData)
     setRoundPlayers(rpData ?? [])
     setHoleScores(hsData ?? [])
@@ -434,8 +436,8 @@ export default function LiveRound() {
                     {isMyHole ? (
                       <>
                         <button onClick={() => updateScore(holeNum, -1)} className="w-7 h-7 rounded-full bg-slate-700 text-white flex items-center justify-center text-lg font-bold hover:bg-slate-600">−</button>
-                        <div className={`w-8 h-8 flex items-center justify-center font-bold text-sm ${score ? scoreClass(score, par) : 'text-slate-600'}`}>
-                          {score ?? '·'}
+                        <div className={`w-8 h-8 flex items-center justify-center font-bold text-sm ${score ? scoreClass(score, par) : 'text-slate-500'}`}>
+                          {score ?? par}
                         </div>
                         <button onClick={() => updateScore(holeNum, 1)} className="w-7 h-7 rounded-full bg-slate-700 text-white flex items-center justify-center text-lg font-bold hover:bg-slate-600">+</button>
                         {score && (
@@ -443,8 +445,8 @@ export default function LiveRound() {
                         )}
                       </>
                     ) : (
-                      <div className={`w-8 h-8 flex items-center justify-center font-bold text-sm ${score ? scoreClass(score, par) : 'text-slate-600'}`}>
-                        {score ?? '·'}
+                      <div className={`w-8 h-8 flex items-center justify-center font-bold text-sm ${score ? scoreClass(score, par) : 'text-slate-500'}`}>
+                        {score ?? par}
                       </div>
                     )}
                   </div>
