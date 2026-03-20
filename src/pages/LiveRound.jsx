@@ -102,17 +102,13 @@ export default function LiveRound() {
     return () => supabase.removeChannel(sub)
   }, [id, loadAll])
 
-  async function updateScore(holeNumber, delta) {
+  async function saveScore(holeNumber, value, pid) {
     if (!player) return
-    const targetPlayer = viewingPlayer ?? player.id
+    const targetPlayer = pid ?? viewingPlayer ?? player.id
+    const newScore = Math.max(1, Math.round(Number(value)))
+    if (!newScore || isNaN(newScore)) return
     const existing = holeScores.find(hs => hs.player_id === targetPlayer && hs.hole_number === holeNumber)
-    if (!existing) {
-      toast.error('Hole record not found — delete and restart this round')
-      return
-    }
-    const currentScore = existing.score ?? existing.par
-    const newScore = Math.max(1, currentScore + delta)
-    // Update local state immediately so UI reflects change right away
+    if (!existing) { toast.error('Hole record not found — delete and restart this round'); return }
     setHoleScores(prev => prev.map(hs => hs.id === existing.id ? { ...hs, score: newScore } : hs))
     const { error } = await supabase.from('hole_scores')
       .update({ score: newScore, updated_at: new Date().toISOString() })
@@ -121,6 +117,27 @@ export default function LiveRound() {
       toast.error('Could not save score: ' + error.message)
       setHoleScores(prev => prev.map(hs => hs.id === existing.id ? { ...hs, score: existing.score } : hs))
     }
+  }
+
+  async function saveTeamScore(holeNumber, value, playerIds) {
+    const newScore = Math.max(1, Math.round(Number(value)))
+    if (!newScore || isNaN(newScore)) return
+    for (const pid of playerIds) {
+      const existing = holeScores.find(hs => hs.player_id === pid && hs.hole_number === holeNumber)
+      if (!existing) continue
+      setHoleScores(prev => prev.map(hs => hs.id === existing.id ? { ...hs, score: newScore } : hs))
+      await supabase.from('hole_scores')
+        .update({ score: newScore, updated_at: new Date().toISOString() })
+        .eq('id', existing.id)
+    }
+  }
+
+  // Keep updateScore as delta-based alias for any remaining callers
+  async function updateScore(holeNumber, delta) {
+    const targetPlayer = viewingPlayer ?? player?.id
+    const existing = holeScores.find(hs => hs.player_id === targetPlayer && hs.hole_number === holeNumber)
+    const currentScore = existing?.score ?? existing?.par ?? 4
+    await saveScore(holeNumber, currentScore + delta, targetPlayer)
   }
 
   async function clearScore(holeNumber) {
@@ -434,64 +451,126 @@ export default function LiveRound() {
             </div>
           )}
 
-          {/* Hole-by-hole */}
-          <div className="card overflow-hidden p-0">
-            <div className="grid grid-cols-[auto_1fr_auto] text-xs text-slate-500 px-4 py-2 border-b border-slate-700">
-              <span className="w-8">Hole</span>
-              <span className="text-center">Par</span>
-              <span className="w-28 text-right">Score</span>
-            </div>
-            {Array.from({ length: 18 }, (_, i) => {
-              const holeNum = i + 1
-              const hsForViewed = holeScores.find(hs => hs.player_id === viewingPlayer && hs.hole_number === holeNum)
-              const par = hsForViewed?.par ?? 4
-              const score = hsForViewed?.score
-              const isMyHole = (isParticipant || canAdmin) && round.status === 'in_progress'
-              const dist = getDistance(holeNum)
+          {/* Scramble team view */}
+          {(() => {
+            const scrambleBet = bets.find(b => b.type === 'scramble')
+            const sbp = scrambleBet ? betPlayers.filter(b => b.bet_id === scrambleBet.id) : []
+            const team1Ids = sbp.filter(b => b.team === 1).map(b => b.player_id)
+            const team2Ids = sbp.filter(b => b.team === 2).map(b => b.player_id)
+            const isScramble = scrambleBet && team1Ids.length > 0 && team2Ids.length > 0
+            const canEdit = (isParticipant || canAdmin) && round.status === 'in_progress'
 
-              return (
-                <div
-                  key={holeNum}
-                  onClick={() => setActiveHole(holeNum)}
-                  className={`grid grid-cols-[auto_1fr_auto] items-center px-4 py-3 border-b border-slate-700/50 cursor-pointer transition-colors
-                    ${activeHole === holeNum ? 'bg-green-900/20 border-l-2 border-l-green-500' : ''}
-                    ${i === 8 ? 'border-b-2 border-slate-500' : ''}`}
-                >
-                  <div className="w-8 font-mono text-sm text-slate-400">{holeNum}</div>
-                  <div className="text-center text-sm text-slate-300">
-                    <div>Par {par}</div>
-                    {dist !== null && <div className="text-xs text-green-400">{dist} yds</div>}
-                  </div>
-                  <div className="w-28 flex items-center justify-end gap-2">
-                    {isMyHole ? (
-                      <>
-                        <button onClick={() => updateScore(holeNum, -1)} className="w-7 h-7 rounded-full bg-slate-700 text-white flex items-center justify-center text-lg font-bold hover:bg-slate-600">−</button>
-                        <div className={`w-8 h-8 flex items-center justify-center font-bold text-sm ${score ? scoreClass(score, par) : 'text-slate-500'}`}>
-                          {score ?? par}
-                        </div>
-                        <button onClick={() => updateScore(holeNum, 1)} className="w-7 h-7 rounded-full bg-slate-700 text-white flex items-center justify-center text-lg font-bold hover:bg-slate-600">+</button>
-                        {score && (
-                          <button onClick={() => clearScore(holeNum)} className="w-5 h-5 rounded-full bg-red-900/50 text-red-400 flex items-center justify-center text-xs hover:bg-red-900/80">✕</button>
-                        )}
-                      </>
-                    ) : (
-                      <div className={`w-8 h-8 flex items-center justify-center font-bold text-sm ${score ? scoreClass(score, par) : 'text-slate-500'}`}>
-                        {score ?? par}
+            if (isScramble) return (
+              <div className="card overflow-hidden p-0">
+                <div className="grid grid-cols-[2rem_3rem_1fr_1fr] text-xs text-slate-500 px-3 py-2 border-b border-slate-700 gap-2">
+                  <span>Hole</span>
+                  <span>Par</span>
+                  <span className="text-center text-blue-400 font-semibold">Team 1</span>
+                  <span className="text-center text-orange-400 font-semibold">Team 2</span>
+                </div>
+                {Array.from({ length: 18 }, (_, i) => {
+                  const holeNum = i + 1
+                  const par = holeScores.find(hs => hs.player_id === team1Ids[0] && hs.hole_number === holeNum)?.par ?? 4
+                  const t1Score = holeScores.find(hs => hs.player_id === team1Ids[0] && hs.hole_number === holeNum)?.score
+                  const t2Score = holeScores.find(hs => hs.player_id === team2Ids[0] && hs.hole_number === holeNum)?.score
+                  const dist = getDistance(holeNum)
+                  return (
+                    <div key={holeNum} onClick={() => setActiveHole(holeNum)}
+                      className={`grid grid-cols-[2rem_3rem_1fr_1fr] items-center px-3 py-2 border-b border-slate-700/50 gap-2 cursor-pointer ${activeHole === holeNum ? 'bg-green-900/20 border-l-2 border-l-green-500' : ''} ${i === 8 ? 'border-b-2 border-slate-500' : ''}`}>
+                      <div className="font-mono text-sm text-slate-400">{holeNum}</div>
+                      <div className="text-sm text-slate-300">
+                        <div>Par {par}</div>
+                        {dist !== null && <div className="text-xs text-green-400">{dist}y</div>}
                       </div>
-                    )}
+                      {/* Team 1 score input */}
+                      <div className="flex justify-center" onClick={e => e.stopPropagation()}>
+                        {canEdit ? (
+                          <input type="number" min="1" max="15"
+                            defaultValue={t1Score ?? par}
+                            key={`t1-${holeNum}-${t1Score}`}
+                            onBlur={e => saveTeamScore(holeNum, e.target.value, team1Ids)}
+                            onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+                            className={`w-12 h-9 text-center rounded-lg font-bold text-sm border-2 bg-slate-700 ${t1Score ? scoreClass(t1Score, par) : 'text-slate-400 border-slate-600'}`}
+                          />
+                        ) : (
+                          <span className={`font-bold text-sm ${t1Score ? scoreClass(t1Score, par) : 'text-slate-500'}`}>{t1Score ?? '-'}</span>
+                        )}
+                      </div>
+                      {/* Team 2 score input */}
+                      <div className="flex justify-center" onClick={e => e.stopPropagation()}>
+                        {canEdit ? (
+                          <input type="number" min="1" max="15"
+                            defaultValue={t2Score ?? par}
+                            key={`t2-${holeNum}-${t2Score}`}
+                            onBlur={e => saveTeamScore(holeNum, e.target.value, team2Ids)}
+                            onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+                            className={`w-12 h-9 text-center rounded-lg font-bold text-sm border-2 bg-slate-700 ${t2Score ? scoreClass(t2Score, par) : 'text-slate-400 border-slate-600'}`}
+                          />
+                        ) : (
+                          <span className={`font-bold text-sm ${t2Score ? scoreClass(t2Score, par) : 'text-slate-500'}`}>{t2Score ?? '-'}</span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+                <div className="grid grid-cols-[2rem_3rem_1fr_1fr] items-center px-3 py-3 bg-slate-700/30 gap-2">
+                  <div className="text-xs text-slate-400 col-span-2">Total</div>
+                  <div className="text-center font-bold text-blue-300">
+                    {team1Ids[0] ? (getTotal(team1Ids[0]) || '--') : '--'}
+                  </div>
+                  <div className="text-center font-bold text-orange-300">
+                    {team2Ids[0] ? (getTotal(team2Ids[0]) || '--') : '--'}
                   </div>
                 </div>
-              )
-            })}
-            {/* Totals row */}
-            <div className="grid grid-cols-[auto_1fr_auto] items-center px-4 py-3 bg-slate-700/30">
-              <div className="w-8 text-xs text-slate-400">Total</div>
-              <div className="text-center text-sm text-slate-300">{round.course_par}</div>
-              <div className="w-28 flex items-center justify-end">
-                <div className="font-bold text-white">{getTotal(viewingPlayer) || '--'}</div>
               </div>
-            </div>
-          </div>
+            )
+
+            // Standard individual scorecard with direct score input
+            return (
+              <div className="card overflow-hidden p-0">
+                <div className="grid grid-cols-[2rem_1fr_5rem] text-xs text-slate-500 px-4 py-2 border-b border-slate-700">
+                  <span>Hole</span>
+                  <span>Par</span>
+                  <span className="text-right">Score</span>
+                </div>
+                {Array.from({ length: 18 }, (_, i) => {
+                  const holeNum = i + 1
+                  const hsForViewed = holeScores.find(hs => hs.player_id === viewingPlayer && hs.hole_number === holeNum)
+                  const par = hsForViewed?.par ?? 4
+                  const score = hsForViewed?.score
+                  const canEdit = (isParticipant || canAdmin) && round.status === 'in_progress'
+                  const dist = getDistance(holeNum)
+                  return (
+                    <div key={holeNum} onClick={() => setActiveHole(holeNum)}
+                      className={`grid grid-cols-[2rem_1fr_5rem] items-center px-4 py-2.5 border-b border-slate-700/50 cursor-pointer ${activeHole === holeNum ? 'bg-green-900/20 border-l-2 border-l-green-500' : ''} ${i === 8 ? 'border-b-2 border-slate-500' : ''}`}>
+                      <div className="font-mono text-sm text-slate-400">{holeNum}</div>
+                      <div className="text-sm text-slate-300">
+                        <div>Par {par}</div>
+                        {dist !== null && <div className="text-xs text-green-400">{dist} yds</div>}
+                      </div>
+                      <div className="flex justify-end" onClick={e => e.stopPropagation()}>
+                        {canEdit ? (
+                          <input type="number" min="1" max="15"
+                            defaultValue={score ?? par}
+                            key={`${viewingPlayer}-${holeNum}-${score}`}
+                            onBlur={e => saveScore(holeNum, e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+                            className={`w-14 h-9 text-center rounded-lg font-bold text-sm border-2 bg-slate-700 ${score ? scoreClass(score, par) : 'text-slate-400 border-slate-600'}`}
+                          />
+                        ) : (
+                          <span className={`font-bold text-sm ${score ? scoreClass(score, par) : 'text-slate-500'}`}>{score ?? '-'}</span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+                <div className="grid grid-cols-[2rem_1fr_5rem] items-center px-4 py-3 bg-slate-700/30">
+                  <div className="text-xs text-slate-400 col-span-2">Total · Par {round.course_par}</div>
+                  <div className="font-bold text-white text-right">{getTotal(viewingPlayer) || '--'}</div>
+                </div>
+              </div>
+            )
+          })()}
         </div>
       )}
 
