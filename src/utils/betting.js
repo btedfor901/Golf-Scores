@@ -9,23 +9,23 @@ export const BET_TYPES = [
 ]
 
 export function settleBet(bet, betPlayers, holeScores, roundPlayers) {
+  const fromHole = bet.press_from_hole ?? 1
+  const relevantHoles = holeScores.filter(hs => hs.hole_number >= fromHole)
   switch (bet.type) {
-    case 'stroke_play': return settleStrokePlay(bet, betPlayers, roundPlayers)
-    case 'match_play': return settleMatchPlay(bet, betPlayers, holeScores)
-    case 'team_stroke_play': return settleTeamStrokePlay(bet, betPlayers, roundPlayers)
-    case 'scramble': return settleScramble(bet, betPlayers, holeScores)
-    case 'quota': return settleQuota(bet, betPlayers, holeScores, roundPlayers)
+    case 'stroke_play': return settleStrokePlay(bet, betPlayers, relevantHoles)
+    case 'match_play': return settleMatchPlay(bet, betPlayers, relevantHoles)
+    case 'team_stroke_play': return settleTeamStrokePlay(bet, betPlayers, relevantHoles)
+    case 'scramble': return settleScramble(bet, betPlayers, relevantHoles)
+    case 'quota': return settleQuota(bet, betPlayers, relevantHoles, roundPlayers)
     default: return []
   }
 }
 
-function settleStrokePlay(bet, betPlayers, roundPlayers) {
-  // Net stroke play - lowest net wins pot
+function settleStrokePlay(bet, betPlayers, holeScores) {
+  // Net stroke play - lowest gross score wins (uses hole scores for press support)
   const scored = betPlayers.map(bp => {
-    const rp = roundPlayers.find(r => r.player_id === bp.player_id)
-    const gross = rp?.total_score ?? 999
-    const net = gross - (rp?.handicap_at_round ?? 0)
-    return { ...bp, net }
+    const gross = holeScores.filter(hs => hs.player_id === bp.player_id && hs.score).reduce((s, hs) => s + hs.score, 0) || 999
+    return { ...bp, net: gross }
   }).sort((a, b) => a.net - b.net)
 
   const winners = scored.filter(s => s.net === scored[0].net)
@@ -42,7 +42,7 @@ function settleStrokePlay(bet, betPlayers, roundPlayers) {
   })
 }
 
-function settleTeamStrokePlay(bet, betPlayers, roundPlayers) {
+function settleTeamStrokePlay(bet, betPlayers, holeScores) {
   // Group by team
   const teams = {}
   betPlayers.forEach(bp => {
@@ -53,10 +53,9 @@ function settleTeamStrokePlay(bet, betPlayers, roundPlayers) {
   const teamKeys = Object.keys(teams)
   if (teamKeys.length !== 2) return []
 
-  // Combined gross score per team
+  // Combined gross score per team using hole scores (supports press)
   const teamGross = (ids) => ids.reduce((sum, id) => {
-    const rp = roundPlayers.find(r => r.player_id === id)
-    return sum + (rp?.total_score ?? 0)
+    return sum + holeScores.filter(hs => hs.player_id === id && hs.score).reduce((s, hs) => s + hs.score, 0)
   }, 0)
 
   // Strokes: details = { givingTeam: '1', strokes: 4 }

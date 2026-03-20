@@ -1,30 +1,57 @@
 /**
- * Simple custom handicap system:
- * Differential = Score - Course Par
- * Handicap = average of best N differentials from last 10 rounds
- *   3 rounds  → best 1
- *   4-6 rounds → best 2
- *   7-8 rounds → best 3
- *   9 rounds   → best 4
- *   10+ rounds → best 5
+ * WHS Handicap System
+ *
+ * Score Differential = (Adjusted Gross Score - Course Rating) x (113 / Slope Rating)
+ * Handicap Index     = Average of best 8 of last 20 differentials (rounded to nearest tenth)
+ *
+ * Sliding scale for fewer than 20 rounds:
+ *   3  rounds → best 1  (subtract 2.0)
+ *   4  rounds → best 1  (subtract 1.0)
+ *   5  rounds → best 1
+ *   6  rounds → best 2
+ *   7-8 rounds → best 2
+ *   9  rounds → best 3
+ *   10-11 → best 4
+ *   12-14 → best 5
+ *   15-16 → best 6
+ *   17-18 → best 7
+ *   19   → best 8 (subtract 1.0)
+ *   20+  → best 8
  */
+
+export function calcDifferential(adjustedScore, courseRating, slopeRating) {
+  const slope = slopeRating || 113
+  const rating = courseRating || 72
+  return parseFloat(((adjustedScore - rating) * (113 / slope)).toFixed(1))
+}
 
 export function calcHandicap(rounds) {
   if (!rounds || rounds.length < 3) return null
-  const last10 = rounds.slice(-10)
-  const diffs = last10
-    .map(r => r.total_score - r.course_par)
+  const last20 = rounds.slice(-20)
+  const n = last20.length
+
+  // Score differentials — use stored differential if available, else fall back to simple calc
+  const diffs = last20
+    .map(r => r.score_differential ?? calcDifferential(r.total_score, r.course_rating, r.slope_rating))
     .sort((a, b) => a - b)
 
-  let take = 1
-  if (last10.length >= 10) take = 5
-  else if (last10.length >= 9) take = 4
-  else if (last10.length >= 7) take = 3
-  else if (last10.length >= 4) take = 2
-  else take = 1
+  let take, adjustment = 0
+  if (n >= 20) { take = 8 }
+  else if (n === 19) { take = 8; adjustment = -1.0 }
+  else if (n >= 17) { take = 7 }
+  else if (n >= 15) { take = 6 }
+  else if (n >= 12) { take = 5 }
+  else if (n >= 10) { take = 4 }
+  else if (n === 9) { take = 3 }
+  else if (n >= 7) { take = 2 }
+  else if (n === 6) { take = 2 }
+  else if (n === 5) { take = 1 }
+  else if (n === 4) { take = 1; adjustment = -1.0 }
+  else { take = 1; adjustment = -2.0 }
 
   const best = diffs.slice(0, take)
-  return parseFloat((best.reduce((a, b) => a + b, 0) / best.length).toFixed(1))
+  const avg = best.reduce((a, b) => a + b, 0) / best.length
+  return parseFloat((avg + adjustment).toFixed(1))
 }
 
 /**

@@ -173,19 +173,21 @@ export default function LiveRound() {
 
   async function pressBet(bet) {
     const bp = betPlayers.filter(b => b.bet_id === bet.id)
+    const fromHole = activeHole ?? 1
     const { data: newBet, error } = await supabase.from('bets').insert({
       round_id: id,
       type: bet.type,
       amount: bet.amount,
-      description: `Press${bet.description ? ` (${bet.description})` : ''}`,
+      description: `Press H${fromHole}${bet.description ? ` (${bet.description})` : ''}`,
       details: bet.details,
+      press_from_hole: fromHole,
       created_by: player.id,
     }).select().single()
     if (error) return toast.error('Could not create press')
     await supabase.from('bet_players').insert(
       bp.map(b => ({ bet_id: newBet.id, player_id: b.player_id, team: b.team, result: 'pending', amount_won_lost: 0 }))
     )
-    toast.success('Press is on! 🎯')
+    toast.success(`Press is on from Hole ${fromHole}! 🎯`)
     loadAll()
   }
 
