@@ -1,9 +1,17 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { useAuth } from '../context/AuthContext'
 import { scoreClass } from '../utils/handicap'
 import toast from 'react-hot-toast'
+
+function haversineYards(lat1, lng1, lat2, lng2) {
+  const R = 6371000
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 1.09361)
+}
 
 export default function LiveRound() {
   const { id } = useParams()
@@ -18,6 +26,10 @@ export default function LiveRound() {
   const [tab, setTab] = useState('scorecard')
   const [viewingPlayer, setViewingPlayer] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [gpsPos, setGpsPos] = useState(null)
+  const [courseCoords, setCourseCoords] = useState(null)
+  const [activeHole, setActiveHole] = useState(1)
+  const watchRef = useRef(null)
 
   const loadAll = useCallback(async () => {
     const [
@@ -46,9 +58,34 @@ export default function LiveRound() {
 
   useEffect(() => {
     loadAll()
-    // Default to viewing own scores
     if (player) setViewingPlayer(player.id)
   }, [loadAll, player])
+
+  // Load course pin coordinates
+  useEffect(() => {
+    if (!round) return
+    supabase.from('courses').select('hole_coordinates').eq('name', round.course_name).maybeSingle()
+      .then(({ data }) => { if (data?.hole_coordinates) setCourseCoords(data.hole_coordinates) })
+  }, [round])
+
+  // Auto-advance active hole to first unscored hole
+  useEffect(() => {
+    if (!viewingPlayer || holeScores.length === 0) return
+    const myScores = holeScores.filter(hs => hs.player_id === viewingPlayer).sort((a, b) => a.hole_number - b.hole_number)
+    const firstUnscored = myScores.find(hs => !hs.score)
+    if (firstUnscored) setActiveHole(firstUnscored.hole_number)
+  }, [viewingPlayer, holeScores])
+
+  // GPS tracking
+  useEffect(() => {
+    if (!navigator.geolocation) return
+    watchRef.current = navigator.geolocation.watchPosition(
+      pos => setGpsPos({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy) }),
+      () => {},
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+    )
+    return () => { if (watchRef.current) navigator.geolocation.clearWatch(watchRef.current) }
+  }, [])
 
   useEffect(() => {
     const sub = supabase
@@ -108,6 +145,22 @@ export default function LiveRound() {
     await supabase.from('rounds').update({ status: 'complete' }).eq('id', id)
     toast.success('Round completed!')
     navigate('/')
+  }
+
+  async function setPin(holeNumber) {
+    if (!gpsPos) return toast.error('No GPS signal yet — wait a moment and try again')
+    const coords = courseCoords ? [...courseCoords] : Array(18).fill(null)
+    coords[holeNumber - 1] = { lat: gpsPos.lat, lng: gpsPos.lng }
+    const { error } = await supabase.from('courses').update({ hole_coordinates: coords }).eq('name', round.course_name)
+    if (error) return toast.error('Could not save pin')
+    setCourseCoords(coords)
+    toast.success(`Pin saved for hole ${holeNumber}!`)
+  }
+
+  function getDistance(holeNumber) {
+    if (!gpsPos || !courseCoords || !courseCoords[holeNumber - 1]) return null
+    const pin = courseCoords[holeNumber - 1]
+    return haversineYards(gpsPos.lat, gpsPos.lng, pin.lat, pin.lng)
   }
 
   const getPlayerScores = (playerId) => holeScores.filter(hs => hs.player_id === playerId).sort((a, b) => a.hole_number - b.hole_number)
@@ -206,6 +259,27 @@ export default function LiveRound() {
             </div>
           )}
 
+          {/* GPS Banner */}
+          {round.status === 'in_progress' && (
+            <div className="card p-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <span className="text-lg">📍</span>
+                <div className="min-w-0">
+                  <div className="text-xs text-slate-400">Hole {activeHole} · {gpsPos ? `±${gpsPos.accuracy}m` : 'Getting GPS...'}</div>
+                  <div className="font-bold text-white text-lg leading-tight">
+                    {getDistance(activeHole) !== null ? `${getDistance(activeHole)} yds` : courseCoords?.[activeHole - 1] ? '---' : 'No pin set'}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setPin(activeHole)}
+                className="flex-shrink-0 text-xs bg-green-700 hover:bg-green-600 text-white px-3 py-2 rounded-lg font-medium"
+              >
+                Set Pin
+              </button>
+            </div>
+          )}
+
           {/* Hole-by-hole */}
           <div className="card overflow-hidden p-0">
             <div className="grid grid-cols-[auto_1fr_auto] text-xs text-slate-500 px-4 py-2 border-b border-slate-700">
@@ -219,11 +293,21 @@ export default function LiveRound() {
               const par = hsForViewed?.par ?? 4
               const score = hsForViewed?.score
               const isMyHole = (isParticipant || canAdmin) && round.status === 'in_progress'
+              const dist = getDistance(holeNum)
 
               return (
-                <div key={holeNum} className={`grid grid-cols-[auto_1fr_auto] items-center px-4 py-3 border-b border-slate-700/50 ${i === 8 ? 'border-b-2 border-slate-500' : ''}`}>
+                <div
+                  key={holeNum}
+                  onClick={() => setActiveHole(holeNum)}
+                  className={`grid grid-cols-[auto_1fr_auto] items-center px-4 py-3 border-b border-slate-700/50 cursor-pointer transition-colors
+                    ${activeHole === holeNum ? 'bg-green-900/20 border-l-2 border-l-green-500' : ''}
+                    ${i === 8 ? 'border-b-2 border-slate-500' : ''}`}
+                >
                   <div className="w-8 font-mono text-sm text-slate-400">{holeNum}</div>
-                  <div className="text-center text-sm text-slate-300">Par {par}</div>
+                  <div className="text-center text-sm text-slate-300">
+                    <div>Par {par}</div>
+                    {dist !== null && <div className="text-xs text-green-400">{dist}y</div>}
+                  </div>
                   <div className="w-28 flex items-center justify-end gap-2">
                     {isMyHole ? (
                       <>
