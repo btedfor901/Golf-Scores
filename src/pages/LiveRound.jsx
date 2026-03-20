@@ -518,7 +518,7 @@ export default function LiveRound() {
                       <div className="flex justify-center" onClick={e => e.stopPropagation()}>
                         {canEdit ? (
                           <input type="number" min="1" max="15"
-                            defaultValue={t1Score ?? par}
+                            defaultValue={t1Score ?? ''}
                             key={`t1-${holeNum}-${t1Score}`}
                             onBlur={e => saveTeamScore(holeNum, e.target.value, team1Ids)}
                             onKeyDown={e => e.key === 'Enter' && e.target.blur()}
@@ -532,7 +532,7 @@ export default function LiveRound() {
                       <div className="flex justify-center" onClick={e => e.stopPropagation()}>
                         {canEdit ? (
                           <input type="number" min="1" max="15"
-                            defaultValue={t2Score ?? par}
+                            defaultValue={t2Score ?? ''}
                             key={`t2-${holeNum}-${t2Score}`}
                             onBlur={e => saveTeamScore(holeNum, e.target.value, team2Ids)}
                             onKeyDown={e => e.key === 'Enter' && e.target.blur()}
@@ -583,7 +583,7 @@ export default function LiveRound() {
                       <div className="flex justify-end" onClick={e => e.stopPropagation()}>
                         {canEdit ? (
                           <input type="number" min="1" max="15"
-                            defaultValue={score ?? par}
+                            defaultValue={score ?? ''}
                             key={`${viewingPlayer}-${holeNum}-${score}`}
                             onBlur={e => saveScore(holeNum, e.target.value)}
                             onKeyDown={e => e.key === 'Enter' && e.target.blur()}
