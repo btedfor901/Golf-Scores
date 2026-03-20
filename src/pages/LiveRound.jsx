@@ -33,6 +33,7 @@ export default function LiveRound() {
   const [gpsPos, setGpsPos] = useState(null)
   const [courseCoords, setCourseCoords] = useState(null)
   const [activeHole, setActiveHole] = useState(1)
+  const [pressModal, setPressModal] = useState(null) // { bet, bp }
   const watchRef = useRef(null)
 
   const loadAll = useCallback(async () => {
@@ -171,23 +172,47 @@ export default function LiveRound() {
     navigate('/')
   }
 
-  async function pressBet(bet) {
+  function pressBet(bet) {
     const bp = betPlayers.filter(b => b.bet_id === bet.id)
+    setPressModal({ bet, bp, amount: String(bet.amount), pressingTeam: null, pressingPlayer: null })
+  }
+
+  async function confirmPress() {
+    const { bet, bp, amount, pressingTeam, pressingPlayer } = pressModal
+    if (!amount || parseFloat(amount) <= 0) return toast.error('Enter a valid amount')
     const fromHole = activeHole ?? 1
+    const isTeamBet = bet.type === 'team_stroke_play' || bet.type === 'scramble'
+
+    // Determine who's in the press
+    let pressBp = bp
+    if (isTeamBet && pressingTeam) {
+      pressBp = bp // keep all players, teams stay same
+    } else if (pressingPlayer) {
+      pressBp = bp // keep all players for now
+    }
+
+    const presserLabel = isTeamBet && pressingTeam
+      ? `Team ${pressingTeam}`
+      : pressingPlayer
+        ? getPlayerName(pressingPlayer).split(' ')[0]
+        : 'All'
+
     const { data: newBet, error } = await supabase.from('bets').insert({
       round_id: id,
       type: bet.type,
-      amount: bet.amount,
-      description: `Press H${fromHole}${bet.description ? ` (${bet.description})` : ''}`,
+      amount: parseFloat(amount),
+      description: `Press H${fromHole} — ${presserLabel}`,
       details: bet.details,
       press_from_hole: fromHole,
       created_by: player.id,
     }).select().single()
+
     if (error) return toast.error('Could not create press')
     await supabase.from('bet_players').insert(
-      bp.map(b => ({ bet_id: newBet.id, player_id: b.player_id, team: b.team, result: 'pending', amount_won_lost: 0 }))
+      pressBp.map(b => ({ bet_id: newBet.id, player_id: b.player_id, team: b.team, result: 'pending', amount_won_lost: 0 }))
     )
     toast.success(`Press is on from Hole ${fromHole}! 🎯`)
+    setPressModal(null)
     loadAll()
   }
 
@@ -585,6 +610,69 @@ export default function LiveRound() {
               )
             })
           )}
+        </div>
+      )}
+
+      {/* Press Modal */}
+      {pressModal && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-800 rounded-2xl p-6 w-full max-w-sm space-y-4 border border-slate-700">
+            <h2 className="text-lg font-bold text-white">🎯 Press Bet</h2>
+            <p className="text-slate-400 text-sm">Starting from Hole {activeHole ?? 1}</p>
+
+            {/* Who is pressing */}
+            <div className="space-y-2">
+              <label className="text-slate-400 text-xs uppercase tracking-wide">Who is pressing?</label>
+              {(pressModal.bet.type === 'team_stroke_play' || pressModal.bet.type === 'scramble') ? (
+                <div className="flex gap-2">
+                  {[1, 2].map(t => (
+                    <button
+                      key={t}
+                      onClick={() => setPressModal(m => ({ ...m, pressingTeam: t, pressingPlayer: null }))}
+                      className={`flex-1 py-2 rounded-lg text-sm font-medium border ${pressModal.pressingTeam === t ? 'border-yellow-500 bg-yellow-500/20 text-yellow-300' : 'border-slate-600 text-slate-400'}`}
+                    >
+                      Team {t}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {pressModal.bp.map(b => (
+                    <button
+                      key={b.player_id}
+                      onClick={() => setPressModal(m => ({ ...m, pressingPlayer: b.player_id, pressingTeam: null }))}
+                      className={`py-2 rounded-lg text-sm font-medium border ${pressModal.pressingPlayer === b.player_id ? 'border-yellow-500 bg-yellow-500/20 text-yellow-300' : 'border-slate-600 text-slate-400'}`}
+                    >
+                      {getPlayerName(b.player_id)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Amount */}
+            <div className="space-y-1">
+              <label className="text-slate-400 text-xs uppercase tracking-wide">Press Amount ($)</label>
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={pressModal.amount}
+                onChange={e => setPressModal(m => ({ ...m, amount: e.target.value }))}
+                className="input w-full"
+                placeholder="10.00"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-1">
+              <button onClick={() => setPressModal(null)} className="flex-1 py-2 rounded-lg bg-slate-700 text-slate-300 text-sm">
+                Cancel
+              </button>
+              <button onClick={confirmPress} className="flex-1 py-2 rounded-lg bg-yellow-600 hover:bg-yellow-500 text-white font-bold text-sm">
+                Press! 🎯
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
