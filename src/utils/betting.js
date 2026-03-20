@@ -3,15 +3,16 @@ import { holePoints, calcQuota } from './handicap'
 export const BET_TYPES = [
   { value: 'stroke_play', label: 'Stroke Play' },
   { value: 'match_play', label: 'Match Play' },
+  { value: 'team_stroke_play', label: '2v2 Stroke Play' },
   { value: 'scramble', label: '2v2 Scramble' },
   { value: 'quota', label: 'Quota' },
 ]
 
 export function settleBet(bet, betPlayers, holeScores, roundPlayers) {
-  // Returns array of { playerId, amountWonLost }
   switch (bet.type) {
     case 'stroke_play': return settleStrokePlay(bet, betPlayers, roundPlayers)
     case 'match_play': return settleMatchPlay(bet, betPlayers, holeScores)
+    case 'team_stroke_play': return settleTeamStrokePlay(bet, betPlayers, roundPlayers)
     case 'scramble': return settleScramble(bet, betPlayers, holeScores)
     case 'quota': return settleQuota(bet, betPlayers, holeScores, roundPlayers)
     default: return []
@@ -37,6 +38,48 @@ function settleStrokePlay(bet, betPlayers, roundPlayers) {
       player_id: bp.player_id,
       result: isWinner ? 'win' : 'lose',
       amount_won_lost: isWinner ? share - bet.amount : -bet.amount,
+    }
+  })
+}
+
+function settleTeamStrokePlay(bet, betPlayers, roundPlayers) {
+  // Group by team
+  const teams = {}
+  betPlayers.forEach(bp => {
+    const t = bp.team ?? 1
+    if (!teams[t]) teams[t] = []
+    teams[t].push(bp.player_id)
+  })
+  const teamKeys = Object.keys(teams)
+  if (teamKeys.length !== 2) return []
+
+  // Combined gross score per team
+  const teamGross = (ids) => ids.reduce((sum, id) => {
+    const rp = roundPlayers.find(r => r.player_id === id)
+    return sum + (rp?.total_score ?? 0)
+  }, 0)
+
+  // Strokes: details = { givingTeam: '1', strokes: 4 }
+  const details = bet.details ?? {}
+  const givingTeam = String(details.givingTeam ?? teamKeys[0])
+  const strokes = parseInt(details.strokes ?? 0)
+  const receivingTeam = teamKeys.find(t => t !== givingTeam) ?? teamKeys[1]
+
+  const scores = {}
+  teamKeys.forEach(t => { scores[t] = teamGross(teams[t]) })
+  scores[receivingTeam] -= strokes  // apply strokes to receiving team
+
+  const winTeam = scores[teamKeys[0]] < scores[teamKeys[1]] ? teamKeys[0]
+    : scores[teamKeys[1]] < scores[teamKeys[0]] ? teamKeys[1] : null
+
+  return betPlayers.map(bp => {
+    const t = String(bp.team ?? 1)
+    const onWinTeam = winTeam && t === winTeam
+    const push = winTeam === null
+    return {
+      player_id: bp.player_id,
+      result: push ? 'push' : onWinTeam ? 'win' : 'lose',
+      amount_won_lost: push ? 0 : onWinTeam ? bet.amount : -bet.amount,
     }
   })
 }

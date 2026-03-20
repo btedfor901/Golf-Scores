@@ -17,6 +17,8 @@ export default function Betting() {
   const [description, setDescription] = useState('')
   const [selectedPlayers, setSelectedPlayers] = useState([])
   const [teams, setTeams] = useState({})
+  const [strokesGivingTeam, setStrokesGivingTeam] = useState(1)
+  const [strokesAmount, setStrokesAmount] = useState('')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -45,21 +47,27 @@ export default function Betting() {
     if (selectedPlayers.length < 2) return toast.error('Select at least 2 players')
     setLoading(true)
 
+    const details = betType === 'team_stroke_play'
+      ? { givingTeam: strokesGivingTeam, strokes: parseInt(strokesAmount) || 0 }
+      : null
+
     const { data: bet, error } = await supabase.from('bets').insert({
       round_id: roundId,
       type: betType,
       amount: parseFloat(amount),
       description: description.trim() || null,
+      details,
       created_by: player.id,
     }).select().single()
 
     if (error) { toast.error(error.message); setLoading(false); return }
 
+    const useTeams = betType === 'scramble' || betType === 'team_stroke_play'
     await supabase.from('bet_players').insert(
       selectedPlayers.map(pid => ({
         bet_id: bet.id,
         player_id: pid,
-        team: betType === 'scramble' ? (teams[pid] ?? 1) : null,
+        team: useTeams ? (teams[pid] ?? 1) : null,
         result: 'pending',
         amount_won_lost: 0,
       }))
@@ -114,7 +122,7 @@ export default function Betting() {
                   className="w-4 h-4 accent-green-500"
                 />
                 <span className="flex-1 text-sm">{rp.players?.name}</span>
-                {betType === 'scramble' && selectedPlayers.includes(rp.player_id) && (
+                {(betType === 'scramble' || betType === 'team_stroke_play') && selectedPlayers.includes(rp.player_id) && (
                   <div className="flex gap-1">
                     <button type="button" onClick={() => setTeam(rp.player_id, 1)} className={`px-2 py-0.5 text-xs rounded ${(teams[rp.player_id] ?? 1) === 1 ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-400'}`}>T1</button>
                     <button type="button" onClick={() => setTeam(rp.player_id, 2)} className={`px-2 py-0.5 text-xs rounded ${teams[rp.player_id] === 2 ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-400'}`}>T2</button>
@@ -124,6 +132,22 @@ export default function Betting() {
             ))}
           </div>
         </div>
+
+        {betType === 'team_stroke_play' && (
+          <div className="card space-y-4">
+            <label className="label">Strokes Given</label>
+            <div className="flex items-center gap-3">
+              <select className="input flex-1" value={strokesGivingTeam} onChange={e => setStrokesGivingTeam(Number(e.target.value))}>
+                <option value={1}>Team 1 gives strokes</option>
+                <option value={2}>Team 2 gives strokes</option>
+              </select>
+              <input className="input w-24" type="number" min="1" max="36" placeholder="# strokes" value={strokesAmount} onChange={e => setStrokesAmount(e.target.value)} required />
+            </div>
+            <p className="text-xs text-slate-400">
+              Team {strokesGivingTeam === 1 ? 2 : 1} receives {strokesAmount || '?'} strokes — their combined score is reduced by that amount.
+            </p>
+          </div>
+        )}
 
         <button type="submit" disabled={loading} className="btn-primary w-full py-3">
           {loading ? 'Creating...' : 'Create Bet 💰'}
