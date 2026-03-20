@@ -7,11 +7,14 @@ import { settleBet } from '../utils/betting'
 import toast from 'react-hot-toast'
 
 function haversineYards(lat1, lng1, lat2, lng2) {
-  const R = 6371000
-  const dLat = (lat2 - lat1) * Math.PI / 180
-  const dLng = (lng2 - lng1) * Math.PI / 180
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
-  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 1.09361)
+  const R_METERS = 6371000
+  const toRad = deg => deg * Math.PI / 180
+  const dLat = toRad(lat2 - lat1)
+  const dLng = toRad(lng2 - lng1)
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+  const distanceMeters = R_METERS * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  const METERS_TO_YARDS = 1.09361
+  return Math.round(distanceMeters * METERS_TO_YARDS)
 }
 
 export default function LiveRound() {
@@ -391,7 +394,7 @@ export default function LiveRound() {
                 <div className="min-w-0">
                   <div className="text-xs text-slate-400">Hole {activeHole} · {gpsPos ? `±${gpsPos.accuracy}m` : 'Getting GPS...'}</div>
                   <div className="font-bold text-white text-lg leading-tight">
-                    {getDistance(activeHole) !== null ? `${getDistance(activeHole)} yds` : courseCoords?.[activeHole - 1] ? '---' : 'No pin set'}
+                    {getDistance(activeHole) !== null ? `${getDistance(activeHole)} yards` : courseCoords?.[activeHole - 1] ? '---' : 'No pin set'}
                   </div>
                 </div>
               </div>
@@ -430,7 +433,7 @@ export default function LiveRound() {
                   <div className="w-8 font-mono text-sm text-slate-400">{holeNum}</div>
                   <div className="text-center text-sm text-slate-300">
                     <div>Par {par}</div>
-                    {dist !== null && <div className="text-xs text-green-400">{dist}y</div>}
+                    {dist !== null && <div className="text-xs text-green-400">{dist} yds</div>}
                   </div>
                   <div className="w-28 flex items-center justify-end gap-2">
                     {isMyHole ? (
